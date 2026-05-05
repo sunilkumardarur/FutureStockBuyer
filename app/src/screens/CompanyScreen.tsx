@@ -1,16 +1,17 @@
 import React, { useState } from 'react';
 import { SECTORS, NOTIFICATION_TYPES } from '../data';
-import type { Company, NotificationsState } from '../types';
+import type { Company, NotificationsState, AppSettings } from '../types';
 import StatusBadge from '../components/shared/StatusBadge';
 import ConfidenceBar from '../components/shared/ConfidenceBar';
 import HypeMeter from '../components/shared/HypeMeter';
 import Icon from '../components/shared/Icon';
-import { claudeComplete } from '../lib/claude';
+import { ollamaComplete } from '../lib/ollama';
 
 interface CompanyScreenProps {
   company: Company;
   favorites: Company[];
   notifications: NotificationsState;
+  settings: AppSettings;
   onBack: () => void;
   onToggleFav: (company: Company) => void;
   onToggleNotif: (company: Company, notifId?: string) => void;
@@ -20,6 +21,7 @@ const CompanyScreen: React.FC<CompanyScreenProps> = ({
   company,
   favorites,
   notifications,
+  settings,
   onBack,
   onToggleFav,
   onToggleNotif,
@@ -34,12 +36,12 @@ const CompanyScreen: React.FC<CompanyScreenProps> = ({
   const fetchAIUpdate = async () => {
     setLoadingAI(true);
     try {
-      const result = await claudeComplete(
-        `You are an IPO intelligence analyst. Write a 2-3 sentence factual update on ${company.name} regarding its IPO plans, current business status, and what investors should watch for. Be specific, factual, and current as of 2026. Focus only on what matters for an IPO decision. Keep it under 60 words.`
+      const result = await ollamaComplete(
+        `You are an IPO intelligence analyst. Write a 2-3 sentence factual update on ${company.name} regarding its IPO plans, current business status, and what investors should watch for. Be specific, factual, and current. Focus only on what matters for an IPO decision. Keep it under 60 words. No markdown, plain text only.`
       );
-      setAiUpdate(result);
+      setAiUpdate(result.trim());
     } catch {
-      setAiUpdate('Unable to fetch AI update at this time. Please check your connection.');
+      setAiUpdate('Could not connect to Ollama. Make sure ollama serve is running with llama3.2.');
     }
     setLoadingAI(false);
   };
@@ -224,10 +226,12 @@ const CompanyScreen: React.FC<CompanyScreenProps> = ({
                 }}
               >
                 <p style={{ fontSize: 11, color: 'var(--text3)' }}>IPO Confidence</p>
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                  <p style={{ fontSize: 11, color: 'var(--text3)' }}>Hype</p>
-                  <HypeMeter value={company.hype} />
-                </div>
+                {settings.showHypeMeter && (
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <p style={{ fontSize: 11, color: 'var(--text3)' }}>Hype</p>
+                    <HypeMeter value={company.hype} />
+                  </div>
+                )}
               </div>
               <ConfidenceBar value={company.confidence} />
             </div>

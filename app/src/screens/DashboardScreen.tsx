@@ -1,18 +1,20 @@
 import React from 'react';
 import { SECTORS } from '../data';
-import type { Company, Sector, NotificationsState } from '../types';
+import type { Company, Sector, AppSettings } from '../types';
 import StatusBadge from '../components/shared/StatusBadge';
 import IPOCountdown from '../components/shared/IPOCountdown';
+import HypeMeter from '../components/shared/HypeMeter';
 import Icon from '../components/shared/Icon';
 
 interface DashboardScreenProps {
   sectors: string[];
   favorites: Company[];
-  notifications: NotificationsState;
   ipoData: Record<string, Company[]>;
+  settings: AppSettings;
   onSectorPress: (sector: Sector) => void;
   onCompanyPress: (company: Company) => void;
   onToggleFav: (company: Company) => void;
+  onSettingsPress: () => void;
 }
 
 const rankColors = [
@@ -27,9 +29,11 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({
   sectors,
   favorites,
   ipoData,
+  settings,
   onSectorPress,
   onCompanyPress,
   onToggleFav,
+  onSettingsPress,
 }) => {
   const userSectors = SECTORS.filter((s) => sectors.includes(s.id));
 
@@ -54,21 +58,17 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({
         >
           Dashboard
         </h1>
-        <div
+        <button
+          onClick={onSettingsPress}
           style={{
-            width: 36,
-            height: 36,
-            borderRadius: '50%',
-            background: 'var(--gold-dim)',
-            border: '1px solid var(--border-gold)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontSize: 16,
+            width: 36, height: 36, borderRadius: '50%',
+            background: 'var(--gold-dim)', border: '1px solid var(--border-gold)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            cursor: 'pointer', fontSize: 16,
           }}
         >
-          📈
-        </div>
+          ⚙️
+        </button>
       </div>
 
       {/* Watchlist strip */}
@@ -149,7 +149,23 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({
 
       {/* Per-sector sections */}
       {userSectors.map((s) => {
-        const preIPO = (ipoData[s.id] || [])
+        const sectorCompanies = ipoData[s.id];
+        // Show skeleton while loading
+        if (!sectorCompanies) {
+          return (
+            <div key={s.id} style={{ padding: '0 20px 20px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                <div style={{ width: 28, height: 28, borderRadius: 8, background: `${s.color}20`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15 }}>{s.icon}</div>
+                <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)' }}>{s.label}</span>
+                <span style={{ fontSize: 11, color: 'var(--gold)', fontFamily: 'var(--mono)' }}>loading...</span>
+              </div>
+              {[1, 2, 3].map((i) => (
+                <div key={i} style={{ height: 52, borderRadius: 13, background: 'var(--surface)', border: '1px solid var(--border)', marginBottom: 7, opacity: 0.5 }} />
+              ))}
+            </div>
+          );
+        }
+        const preIPO = sectorCompanies
           .filter((c) => c.status !== 'Listed' && c.status !== "Recently IPO'd")
           .slice(0, 5);
         if (preIPO.length === 0) return null;

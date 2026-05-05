@@ -1,5 +1,5 @@
-import React from 'react';
-import type { Company, Sector, NotificationsState } from '../types';
+import React, { useState } from 'react';
+import type { Company, Sector, NotificationsState, AppSettings } from '../types';
 import StatusBadge from '../components/shared/StatusBadge';
 import ConfidenceBar from '../components/shared/ConfidenceBar';
 import HypeMeter from '../components/shared/HypeMeter';
@@ -10,10 +10,12 @@ interface SectorScreenProps {
   ipoData: Record<string, Company[]>;
   favorites: Company[];
   notifications: NotificationsState;
+  settings: AppSettings;
   onBack: () => void;
   onCompanyPress: (company: Company) => void;
   onToggleFav: (company: Company) => void;
   onToggleNotif: (company: Company) => void;
+  onRefresh: (sectorId: string) => Promise<void>;
 }
 
 const SectorScreen: React.FC<SectorScreenProps> = ({
@@ -21,11 +23,21 @@ const SectorScreen: React.FC<SectorScreenProps> = ({
   ipoData,
   favorites,
   notifications,
+  settings,
   onBack,
   onCompanyPress,
   onToggleFav,
   onToggleNotif,
+  onRefresh,
 }) => {
+  const [refreshing, setRefreshing] = useState(false);
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await onRefresh(sector.id);
+    setRefreshing(false);
+  };
+
   const companies = ipoData[sector.id] ?? [];
   const preIPO = companies.filter(
     (c) => c.status !== 'Listed' && c.status !== "Recently IPO'd"
@@ -94,6 +106,21 @@ const SectorScreen: React.FC<SectorScreenProps> = ({
             {sector.label}
           </h1>
         </div>
+        <button
+          onClick={handleRefresh}
+          disabled={refreshing}
+          style={{
+            width: 36, height: 36, borderRadius: 10,
+            background: 'var(--surface)', border: '1px solid var(--border)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            cursor: refreshing ? 'default' : 'pointer', flexShrink: 0,
+            opacity: refreshing ? 0.5 : 1,
+            fontSize: 16,
+          }}
+          title="Refresh data"
+        >
+          🔄
+        </button>
       </div>
 
       <div style={{ flex: 1, overflowY: 'auto', padding: '14px 20px' }}>
@@ -264,10 +291,12 @@ const SectorScreen: React.FC<SectorScreenProps> = ({
                   }}
                 >
                   <p style={{ fontSize: 10, color: 'var(--text3)' }}>IPO CONFIDENCE</p>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <p style={{ fontSize: 10, color: 'var(--text3)' }}>HYPE</p>
-                    <HypeMeter value={c.hype} />
-                  </div>
+                  {settings.showHypeMeter && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <p style={{ fontSize: 10, color: 'var(--text3)' }}>HYPE</p>
+                      <HypeMeter value={c.hype} />
+                    </div>
+                  )}
                 </div>
                 <ConfidenceBar value={c.confidence} />
               </div>

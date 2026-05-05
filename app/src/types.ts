@@ -44,6 +44,14 @@ export type NotificationsState = Record<string, Record<string, boolean>>;
 
 export type StackEntry =
   | { type: 'sector'; sector: Sector }
-  | { type: 'company'; company: Company };
+  | { type: 'company'; company: Company }
+  | { type: 'settings' };
 
 export type TabId = 'dashboard' | 'calendar' | 'watchlist' | 'portfolio' | 'explore';
+
+export interface AppSettings {
+  accentColor: string;
+  lightMode: boolean;
+  showHypeMeter: boolean;
+  compactCards: boolean;
+}

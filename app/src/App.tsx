@@ -1,11 +1,7 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import {
-  IPO_DATA,
-  EXAMPLE_SECTORS,
-  EXAMPLE_FAVORITES,
-  EXAMPLE_NOTIFICATIONS,
-} from './data';
-import type { Company, Sector, NotificationsState, StackEntry, TabId } from './types';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { SECTORS } from './data';
+import type { Company, Sector, NotificationsState, StackEntry, TabId, AppSettings } from './types';
+import { fetchMultipleSectors, fetchSectorCompanies, clearCacheForSector } from './lib/ipoData';
 
 import TabBar from './components/shared/TabBar';
 import OnboardingScreen from './screens/OnboardingScreen';
@@ -17,6 +13,8 @@ import NotificationsScreen from './screens/NotificationsScreen';
 import ExploreScreen from './screens/ExploreScreen';
 import CalendarScreen from './screens/CalendarScreen';
 import PortfolioScreen from './screens/PortfolioScreen';
+import SettingsScreen from './screens/SettingsScreen';
+import LoadingScreen from './screens/LoadingScreen';
 
 function load<T>(key: string, fallback: T): T {
   try {
@@ -27,60 +25,131 @@ function load<T>(key: string, fallback: T): T {
   }
 }
 
+const DEFAULT_SETTINGS: AppSettings = {
+  accentColor: '#D4A843',
+  lightMode: false,
+  showHypeMeter: true,
+  compactCards: false,
+};
+
 const App: React.FC = () => {
-  const [onboarded, setOnboarded] = useState<boolean>(() =>
-    load('fsb_onboarded', false)
-  );
-  const [userSectors, setUserSectors] = useState<string[]>(() =>
-    load('fsb_sectors', EXAMPLE_SECTORS)
-  );
-  const [favorites, setFavorites] = useState<Company[]>(() =>
-    load('fsb_favorites', EXAMPLE_FAVORITES)
-  );
-  const [notifications, setNotifications] = useState<NotificationsState>(() =>
-    load('fsb_notifications', EXAMPLE_NOTIFICATIONS)
-  );
+  const [onboarded, setOnboarded] = useState<boolean>(() => load('fsb_onboarded', false));
+  const [userSectors, setUserSectors] = useState<string[]>(() => load('fsb_sectors', []));
+  const [favorites, setFavorites] = useState<Company[]>(() => load('fsb_favorites', []));
+  const [notifications, setNotifications] = useState<NotificationsState>(() => load('fsb_notifications', {}));
+  const [settings, setSettings] = useState<AppSettings>(() => load('fsb_settings', DEFAULT_SETTINGS));
   const [tab, setTab] = useState<TabId>('dashboard');
   const [stack, setStack] = useState<StackEntry[]>([]);
 
-  // Persist
-  useEffect(() => {
-    try { localStorage.setItem('fsb_onboarded', JSON.stringify(onboarded)); } catch { /* noop */ }
-  }, [onboarded]);
-  useEffect(() => {
-    try { localStorage.setItem('fsb_sectors', JSON.stringify(userSectors)); } catch { /* noop */ }
-  }, [userSectors]);
-  useEffect(() => {
-    try { localStorage.setItem('fsb_favorites', JSON.stringify(favorites)); } catch { /* noop */ }
-  }, [favorites]);
-  useEffect(() => {
-    try { localStorage.setItem('fsb_notifications', JSON.stringify(notifications)); } catch { /* noop */ }
-  }, [notifications]);
+  // Live IPO data fetched from Ollama, keyed by sectorId
+  const [ipoData, setIpoData] = useState<Record<string, Company[]>>({});
+  const [loadingMessage, setLoadingMessage] = useState<string>('');
+  const [loadingError, setLoadingError] = useState<string>('');
 
-  // Flatten all companies
+  // ── Persist ────────────────────────────────────────────────────────────────
+  useEffect(() => { try { localStorage.setItem('fsb_onboarded', JSON.stringify(onboarded)); } catch { /* noop */ } }, [onboarded]);
+  useEffect(() => { try { localStorage.setItem('fsb_sectors', JSON.stringify(userSectors)); } catch { /* noop */ } }, [userSectors]);
+  useEffect(() => { try { localStorage.setItem('fsb_favorites', JSON.stringify(favorites)); } catch { /* noop */ } }, [favorites]);
+  useEffect(() => { try { localStorage.setItem('fsb_notifications', JSON.stringify(notifications)); } catch { /* noop */ } }, [notifications]);
+  useEffect(() => { try { localStorage.setItem('fsb_settings', JSON.stringify(settings)); } catch { /* noop */ } }, [settings]);
+
+  // ── Apply theme from settings ──────────────────────────────────────────────
+  useEffect(() => {
+    const r = document.documentElement;
+    const c = settings.accentColor;
+    r.style.setProperty('--gold', c);
+    r.style.setProperty('--gold-dim', c + '26');
+    r.style.setProperty('--gold-glow', c + '59');
+    r.style.setProperty('--border-gold', c + '40');
+    r.style.setProperty('--gold-light', c);
+
+    if (settings.lightMode) {
+      r.style.setProperty('--bg', '#F5F4F0');
+      r.style.setProperty('--bg2', '#ECEAE4');
+      r.style.setProperty('--bg3', '#E4E2DC');
+      r.style.setProperty('--bg4', '#D8D6D0');
+      r.style.setProperty('--surface', '#FFFFFF');
+      r.style.setProperty('--surface2', '#F0EEE8');
+      r.style.setProperty('--border', 'rgba(0,0,0,0.08)');
+      r.style.setProperty('--text', '#18181A');
+      r.style.setProperty('--text2', '#5A5868');
+      r.style.setProperty('--text3', '#9A9898');
+    } else {
+      r.style.setProperty('--bg', '#0D0D0F');
+      r.style.setProperty('--bg2', '#13131A');
+      r.style.setProperty('--bg3', '#1A1A24');
+      r.style.setProperty('--bg4', '#22222F');
+      r.style.setProperty('--surface', '#1E1E2A');
+      r.style.setProperty('--surface2', '#252535');
+      r.style.setProperty('--border', 'rgba(255,255,255,0.07)');
+      r.style.setProperty('--text', '#F0EFE8');
+      r.style.setProperty('--text2', '#9A9898');
+      r.style.setProperty('--text3', '#5A5868');
+    }
+  }, [settings.accentColor, settings.lightMode]);
+
+  // ── Load IPO data for a sector (with cache) ────────────────────────────────
+  const loadSector = useCallback(async (sectorId: string) => {
+    if (ipoData[sectorId]) return; // already loaded
+    try {
+      const companies = await fetchSectorCompanies(sectorId);
+      setIpoData((prev) => ({ ...prev, [sectorId]: companies }));
+    } catch (err) {
+      console.error('Failed to load sector', sectorId, err);
+    }
+  }, [ipoData]);
+
+  // ── On onboarding complete: fetch all selected sectors ─────────────────────
+  const handleOnboard = async (sectors: string[]) => {
+    setUserSectors(sectors);
+    setLoadingError('');
+    setLoadingMessage('Fetching IPO data for your sectors...');
+    try {
+      await fetchMultipleSectors(sectors, (sectorId, done, total) => {
+        const label = SECTORS.find((s) => s.id === sectorId)?.label ?? sectorId;
+        setLoadingMessage(`Loading ${label}... (${done}/${total})`);
+        // Update ipoData incrementally so dashboard shows as each sector loads
+        fetchSectorCompanies(sectorId).then((companies) => {
+          setIpoData((prev) => ({ ...prev, [sectorId]: companies }));
+        });
+      });
+      setOnboarded(true);
+      setLoadingMessage('');
+    } catch (err) {
+      setLoadingError(
+        'Could not connect to Ollama. Make sure Ollama is running (ollama serve) and llama3.2 is installed (ollama pull llama3.2).'
+      );
+      setLoadingMessage('');
+    }
+  };
+
+  // ── Load data for sectors already onboarded (on app start) ────────────────
+  useEffect(() => {
+    if (!onboarded || userSectors.length === 0) return;
+    userSectors.forEach((sectorId) => {
+      if (!ipoData[sectorId]) {
+        fetchSectorCompanies(sectorId)
+          .then((companies) => setIpoData((prev) => ({ ...prev, [sectorId]: companies })))
+          .catch(() => {/* show stale or empty gracefully */});
+      }
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onboarded, userSectors.join(',')]);
+
+  // ── Flatten all loaded companies for search ────────────────────────────────
   const allCompanies = useMemo<Company[]>(() => {
-    const arr: Company[] = [];
-    Object.values(IPO_DATA).forEach((companies) => arr.push(...companies));
-    return arr;
-  }, []);
+    return Object.values(ipoData).flat();
+  }, [ipoData]);
 
   const notifCount = useMemo(
-    () =>
-      Object.values(notifications).filter((n) => Object.values(n).some(Boolean)).length,
+    () => Object.values(notifications).filter((n) => Object.values(n).some(Boolean)).length,
     [notifications]
   );
 
-  // ── Handlers ──────────────────────────────────────────────────────────────
-
-  const handleOnboard = (sectors: string[]) => {
-    setUserSectors(sectors);
-    setOnboarded(true);
-  };
-
+  // ── Handlers ───────────────────────────────────────────────────────────────
   const toggleFav = (company: Company) => {
     setFavorites((prev) => {
-      const exists = prev.some((f) => f.id === company.id);
-      if (exists) return prev; // already in, don't duplicate
+      if (prev.some((f) => f.id === company.id)) return prev;
       return [...prev, company];
     });
   };
@@ -88,8 +157,7 @@ const App: React.FC = () => {
   const toggleFavFromSector = (company: Company) => {
     setFavorites((prev) => {
       const exists = prev.some((f) => f.id === company.id);
-      if (exists) return prev.filter((f) => f.id !== company.id);
-      return [...prev, company];
+      return exists ? prev.filter((f) => f.id !== company.id) : [...prev, company];
     });
   };
 
@@ -108,16 +176,11 @@ const App: React.FC = () => {
     if (notifId) {
       setNotifications((prev) => ({
         ...prev,
-        [company.id]: {
-          ...(prev[company.id] ?? {}),
-          [notifId]: !prev[company.id]?.[notifId],
-        },
+        [company.id]: { ...(prev[company.id] ?? {}), [notifId]: !prev[company.id]?.[notifId] },
       }));
     } else {
-      // Toggle all default notifs on/off
       setNotifications((prev) => {
-        const existing = prev[company.id];
-        const anyOn = existing && Object.values(existing).some(Boolean);
+        const anyOn = prev[company.id] && Object.values(prev[company.id]).some(Boolean);
         if (anyOn) {
           const cleared = { ...prev };
           delete cleared[company.id];
@@ -128,15 +191,35 @@ const App: React.FC = () => {
     }
   };
 
+  const toggleSector = (sectorId: string) => {
+    setUserSectors((prev) => {
+      if (prev.includes(sectorId)) return prev.filter((s) => s !== sectorId);
+      // Load data for newly followed sector
+      loadSector(sectorId);
+      return [...prev, sectorId];
+    });
+  };
+
+  const refreshSector = async (sectorId: string) => {
+    clearCacheForSector(sectorId);
+    setIpoData((prev) => { const next = { ...prev }; delete next[sectorId]; return next; });
+    const companies = await fetchSectorCompanies(sectorId);
+    setIpoData((prev) => ({ ...prev, [sectorId]: companies }));
+  };
+
+  const updateSettings = (patch: Partial<AppSettings>) => {
+    setSettings((prev) => ({ ...prev, ...patch }));
+  };
+
   const pushScreen = (entry: StackEntry) => setStack((s) => [...s, entry]);
   const popScreen = () => setStack((s) => s.slice(0, -1));
 
   const handleTabChange = (newTab: TabId) => {
-    setStack([]); // clear navigation stack on tab change
+    setStack([]);
     setTab(newTab);
   };
 
-  // ── Navigation stack rendering ────────────────────────────────────────────
+  // ── Navigation stack ───────────────────────────────────────────────────────
   const renderStack = () => {
     if (stack.length === 0) return null;
     const top = stack[stack.length - 1];
@@ -145,13 +228,15 @@ const App: React.FC = () => {
       return (
         <SectorScreen
           sector={top.sector}
-          ipoData={IPO_DATA}
+          ipoData={ipoData}
           favorites={favorites}
           notifications={notifications}
+          settings={settings}
           onBack={popScreen}
           onCompanyPress={(c) => pushScreen({ type: 'company', company: c })}
           onToggleFav={toggleFavFromSector}
           onToggleNotif={toggleNotif}
+          onRefresh={refreshSector}
         />
       );
     }
@@ -162,6 +247,7 @@ const App: React.FC = () => {
           company={top.company}
           favorites={favorites}
           notifications={notifications}
+          settings={settings}
           onBack={popScreen}
           onToggleFav={toggleFav}
           onToggleNotif={toggleNotif}
@@ -169,10 +255,20 @@ const App: React.FC = () => {
       );
     }
 
+    if (top.type === 'settings') {
+      return (
+        <SettingsScreen
+          settings={settings}
+          onBack={popScreen}
+          onUpdate={updateSettings}
+        />
+      );
+    }
+
     return null;
   };
 
-  // ── Tab content ───────────────────────────────────────────────────────────
+  // ── Tab content ────────────────────────────────────────────────────────────
   const renderTab = () => {
     switch (tab) {
       case 'dashboard':
@@ -180,18 +276,19 @@ const App: React.FC = () => {
           <DashboardScreen
             sectors={userSectors}
             favorites={favorites}
-            notifications={notifications}
-            ipoData={IPO_DATA}
+            ipoData={ipoData}
+            settings={settings}
             onSectorPress={(s: Sector) => pushScreen({ type: 'sector', sector: s })}
             onCompanyPress={(c: Company) => pushScreen({ type: 'company', company: c })}
             onToggleFav={toggleFavFromSector}
+            onSettingsPress={() => pushScreen({ type: 'settings' })}
           />
         );
       case 'calendar':
         return (
           <CalendarScreen
             sectors={userSectors}
-            ipoData={IPO_DATA}
+            ipoData={ipoData}
             onCompanyPress={(c: Company) => pushScreen({ type: 'company', company: c })}
           />
         );
@@ -211,10 +308,12 @@ const App: React.FC = () => {
         return (
           <ExploreScreen
             sectors={userSectors}
-            ipoData={IPO_DATA}
+            allSectors={SECTORS}
+            ipoData={ipoData}
             onSectorPress={(s: Sector) => pushScreen({ type: 'sector', sector: s })}
             onCompanyPress={(c: Company) => pushScreen({ type: 'company', company: c })}
             onAddCustom={addToFav}
+            onToggleSector={toggleSector}
           />
         );
       default:
@@ -223,10 +322,18 @@ const App: React.FC = () => {
   };
 
   // ── Render ─────────────────────────────────────────────────────────────────
-  if (!onboarded) {
+  if (!onboarded || loadingMessage) {
     return (
       <div className="app-shell">
-        <OnboardingScreen onDone={handleOnboard} />
+        {loadingMessage || loadingError ? (
+          <LoadingScreen
+            message={loadingMessage}
+            error={loadingError}
+            onRetry={loadingError ? () => { setLoadingError(''); setOnboarded(false); } : undefined}
+          />
+        ) : (
+          <OnboardingScreen onDone={handleOnboard} />
+        )}
       </div>
     );
   }
@@ -235,29 +342,22 @@ const App: React.FC = () => {
 
   return (
     <div className="app-shell">
-      {/* Main content area */}
       <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
-        {/* Tab content — always rendered but hidden behind stack if needed */}
         <div
           style={{
-            position: 'absolute',
-            inset: 0,
+            position: 'absolute', inset: 0,
             visibility: stackContent ? 'hidden' : 'visible',
             pointerEvents: stackContent ? 'none' : 'auto',
           }}
         >
           {renderTab()}
         </div>
-
-        {/* Stack overlay */}
         {stackContent && (
           <div style={{ position: 'absolute', inset: 0, background: 'var(--bg)', zIndex: 10 }}>
             {stackContent}
           </div>
         )}
       </div>
-
-      {/* Tab bar */}
       <TabBar active={tab} onTab={handleTabChange} notifCount={notifCount} />
     </div>
   );

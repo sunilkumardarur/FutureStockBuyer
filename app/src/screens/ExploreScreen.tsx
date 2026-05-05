@@ -1,31 +1,35 @@
 import React, { useState } from 'react';
-import { SECTORS } from '../data';
 import type { Company, Sector } from '../types';
 import StatusBadge from '../components/shared/StatusBadge';
-import { claudeComplete } from '../lib/claude';
+import { lookupCustomCompany } from '../lib/ipoData';
 
 interface ExploreScreenProps {
   sectors: string[];
+  allSectors: Sector[];
   ipoData: Record<string, Company[]>;
   onSectorPress: (sector: Sector) => void;
   onCompanyPress: (company: Company) => void;
   onAddCustom: (company: Company) => void;
+  onToggleSector: (sectorId: string) => void;
 }
 
 const ExploreScreen: React.FC<ExploreScreenProps> = ({
   sectors,
+  allSectors,
   ipoData,
   onSectorPress,
   onCompanyPress,
   onAddCustom,
+  onToggleSector,
 }) => {
   const [search, setSearch] = useState('');
   const [customSearch, setCustomSearch] = useState('');
   const [loadingCustom, setLoadingCustom] = useState(false);
   const [customResult, setCustomResult] = useState<Company | null>(null);
+  const [lookupError, setLookupError] = useState('');
 
   const allResults = search
-    ? SECTORS.map((s) => ({
+    ? allSectors.map((s) => ({
         ...s,
         companies: (ipoData[s.id] ?? []).filter(
           (c) =>
@@ -39,37 +43,12 @@ const ExploreScreen: React.FC<ExploreScreenProps> = ({
     if (!customSearch.trim()) return;
     setLoadingCustom(true);
     setCustomResult(null);
+    setLookupError('');
     try {
-      const result = await claudeComplete(
-        `You are an IPO intelligence analyst. For the company "${customSearch}", provide a brief JSON response with these fields: name (string), description (1-2 sentences about the company and its IPO status or potential), eta (IPO expected timeline or "Unknown"), status ("Filed S-1" | "Exploring" | "Rumored" | "Watching" | "Listed"), valuation (estimated valuation or "Private"), newsHeadline (most recent relevant news headline), sector (one of: ai, biotech, fintech, ev, space, cybersec, cloud, crypto, health, robotics, defense, quantum, logistics, edtech, media, food, retail, realestate). Respond ONLY with valid JSON, no other text.`
-      );
-      const parsed = JSON.parse(result.trim());
-      setCustomResult({
-        ...parsed,
-        id: `custom_${Date.now()}`,
-        tags: [],
-        hype: 60,
-        confidence: 50,
-        newsDate: 'Recent',
-        etaDate: '2027-01-01',
-      } as Company);
+      const company = await lookupCustomCompany(customSearch);
+      setCustomResult(company);
     } catch {
-      setCustomResult({
-        name: customSearch,
-        description:
-          'Could not retrieve information. Please try a different search term.',
-        eta: 'Unknown',
-        status: 'Watching',
-        valuation: 'Private',
-        newsHeadline: 'No recent news found',
-        sector: 'cloud',
-        id: `custom_${Date.now()}`,
-        tags: [],
-        hype: 50,
-        confidence: 40,
-        newsDate: 'Unknown',
-        etaDate: '2027-01-01',
-      } as Company);
+      setLookupError('Could not connect to Ollama. Make sure ollama serve is running.');
     }
     setLoadingCustom(false);
   };
@@ -261,6 +240,7 @@ const ExploreScreen: React.FC<ExploreScreenProps> = ({
                 >
                   {customResult.description}
                 </p>
+                {lookupError && <p style={{ fontSize: 12, color: 'var(--red)', marginBottom: 8 }}>{lookupError}</p>}
                 <div style={{ display: 'flex', gap: 8 }}>
                   <button
                     onClick={() => {
@@ -308,58 +288,54 @@ const ExploreScreen: React.FC<ExploreScreenProps> = ({
         {/* All sectors grid */}
         {!search && (
           <>
-            <h2
-              style={{
-                fontSize: 13,
-                fontWeight: 600,
-                color: 'var(--text2)',
-                textTransform: 'uppercase',
-                letterSpacing: '0.06em',
-                marginBottom: 12,
-              }}
-            >
+            <h2 style={{ fontSize: 13, fontWeight: 600, color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>
               All Sectors
             </h2>
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: '1fr 1fr 1fr',
-                gap: 10,
-              }}
-            >
-              {SECTORS.map((s) => {
+            <p style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 12 }}>
+              Tap to browse · Hold ★ to follow/unfollow
+            </p>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
+              {allSectors.map((s) => {
                 const following = sectors.includes(s.id);
                 return (
-                  <button
-                    key={s.id}
-                    onClick={() => onSectorPress(s)}
-                    style={{
-                      padding: '12px 6px',
-                      borderRadius: 14,
-                      background: following ? 'var(--gold-dim)' : 'var(--surface)',
-                      border: following
-                        ? '1.5px solid var(--border-gold)'
-                        : '1.5px solid transparent',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      alignItems: 'center',
-                      gap: 6,
-                    }}
-                  >
-                    <span style={{ fontSize: 22 }}>{s.icon}</span>
-                    <span
+                  <div key={s.id} style={{ position: 'relative' }}>
+                    <button
+                      onClick={() => onSectorPress(s)}
                       style={{
-                        fontSize: 10,
-                        color: following ? 'var(--gold)' : 'var(--text2)',
-                        fontWeight: following ? 600 : 400,
-                        textAlign: 'center',
-                        lineHeight: 1.3,
+                        width: '100%',
+                        padding: '12px 6px',
+                        borderRadius: 14,
+                        background: following ? 'var(--gold-dim)' : 'var(--surface)',
+                        border: following ? '1.5px solid var(--border-gold)' : '1.5px solid transparent',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        gap: 6,
                       }}
                     >
-                      {s.label}
-                    </span>
-                  </button>
+                      <span style={{ fontSize: 22 }}>{s.icon}</span>
+                      <span style={{ fontSize: 10, color: following ? 'var(--gold)' : 'var(--text2)', fontWeight: following ? 600 : 400, textAlign: 'center', lineHeight: 1.3 }}>
+                        {s.label}
+                      </span>
+                    </button>
+                    {/* Follow/unfollow toggle */}
+                    <button
+                      onClick={(e) => { e.stopPropagation(); onToggleSector(s.id); }}
+                      style={{
+                        position: 'absolute', top: 4, right: 4,
+                        width: 18, height: 18, borderRadius: '50%',
+                        background: following ? 'var(--gold)' : 'var(--bg4)',
+                        border: following ? 'none' : '1px solid var(--border)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        cursor: 'pointer', fontSize: 9, color: following ? '#0D0D0F' : 'var(--text3)',
+                        fontWeight: 700,
+                      }}
+                      title={following ? 'Unfollow' : 'Follow'}
+                    >
+                      {following ? '✓' : '+'}
+                    </button>
+                  </div>
                 );
               })}
             </div>
