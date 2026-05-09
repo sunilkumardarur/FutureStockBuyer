@@ -32,31 +32,6 @@ export function clearCacheForSector(sectorId: string) {
   localStorage.removeItem(CACHE_KEY(sectorId));
 }
 
-// ── Well-known seed companies per sector ──────────────────────────────────────
-// These ensure Ollama focuses on the real, most-anticipated companies rather
-// than generating random plausible ones. Ollama fills in the details (valuation,
-// ETA, confidence, description, news) based on its training knowledge.
-const SECTOR_SEEDS: Record<string, string[]> = {
-  ai:         ['OpenAI', 'Anthropic', 'Databricks', 'xAI (Elon Musk)', 'Scale AI'],
-  biotech:    ['Altos Labs', 'Isomorphic Labs', 'Alto Neuroscience', 'Xaira Therapeutics', 'Retro Biosciences'],
-  fintech:    ['Stripe', 'Klarna', 'Chime', 'Plaid', 'Brex'],
-  ev:         ['Northvolt', 'Ampere (Renault EV)', 'Rivian Accessories', 'ZeroAvia', 'Redwood Materials'],
-  space:      ['SpaceX / Starlink', 'Relativity Space', 'Vast Space', 'K2 Space', 'Axiom Space'],
-  cybersec:   ['Wiz', 'Snyk', 'Armis Security', 'Cyera', 'Lacework'],
-  cloud:      ['Rippling', 'Vercel', 'Retool', 'Harness', 'Temporal Technologies'],
-  crypto:     ['Circle Internet', 'Kraken', 'Chainalysis', 'BitGo', 'Fireblocks'],
-  health:     ['Noom', 'Zipline International', 'Sword Health', 'Brightside Health', 'Hinge Health'],
-  retail:     ['Shein', 'Faire', 'GoPuff', 'Bolt Financial', 'Salsify'],
-  defense:    ['Anduril Industries', 'Shield AI', 'Sarcos Technology', 'Hermeus', 'Joby Aviation'],
-  robotics:   ['Figure AI', 'Physical Intelligence', 'Agility Robotics', '1X Technologies', 'Apptronik'],
-  media:      ['Substack', 'Plex', 'ReelShort', 'Canela Media', 'Discord'],
-  food:       ['Farmers Business Network', 'Plenty', 'Apeel Sciences', 'NotCo', 'Bowery Farming'],
-  realestate: ['REZI', 'Pacaso', 'VTS', 'Knock', 'Landis'],
-  quantum:    ['PsiQuantum', 'Quantinuum', 'IQM Quantum', 'Atom Computing', 'Classiq'],
-  logistics:  ['Flexport', 'project44', 'Stord', 'Loadsmart', 'Outrider'],
-  edtech:     ['Age of Learning', 'Synthesis', 'Duolingo Max', 'Electives', 'Masterschool'],
-};
-
 const SECTOR_LABELS: Record<string, string> = {
   ai:         'AI & Machine Learning',
   biotech:    'Biotech & Genomics',
@@ -78,17 +53,14 @@ const SECTOR_LABELS: Record<string, string> = {
   edtech:     'EdTech & Learning',
 };
 
-// "Listed" is excluded — this app tracks PRE-IPO companies only
-const VALID_STATUSES = ['Filed S-1', 'Exploring', 'Rumored', 'Watching'];
+const VALID_STATUSES: string[] = ['Filed S-1', 'Exploring', 'Rumored', 'Watching'];
 
 function sanitizeCompany(raw: Record<string, unknown>, sectorId: string, index: number): Company {
-  // Force status to a valid pre-IPO value — never allow "Listed"
   const rawStatus = String(raw.status ?? '');
   const status = VALID_STATUSES.includes(rawStatus)
     ? (rawStatus as Company['status'])
     : 'Watching';
 
-  // If ticker is present but status is not Listed, clear it (pre-IPO = no ticker yet)
   const ticker = null;
 
   return {
@@ -116,26 +88,21 @@ export async function fetchSectorCompanies(sectorId: string): Promise<Company[]>
   if (cached) return cached;
 
   const label = SECTOR_LABELS[sectorId] ?? sectorId;
-  const seeds = SECTOR_SEEDS[sectorId] ?? [];
-  const seedList = seeds.map((name, i) => `${i + 1}. ${name}`).join('\n');
 
-  const prompt = `You are an IPO research analyst. Your task is to provide detailed IPO tracking data for the following well-known private companies in the "${label}" sector.
+  const prompt = `You are an IPO research analyst. Identify the 5 most anticipated private companies in the "${label}" sector that are most likely to IPO soon. Use your knowledge of current market conditions, funding rounds, valuations, and IPO signals.
 
-Here are the exact 5 companies to include — use these names precisely:
-${seedList}
+Only include companies that are genuinely still PRIVATE — do not include any company that has already completed its IPO and is publicly traded on a stock exchange.
 
-For each company, return accurate information based on what you know about their IPO plans, valuation, and business status. These are all PRIVATE companies that have NOT yet had their IPO (do not mark any as Listed).
-
-Return a JSON array of exactly 5 objects in the same order as the list above.
+Return a JSON array of exactly 5 objects, ordered from most to least anticipated.
 
 Each object MUST have these exact fields:
 - id: short lowercase slug (e.g. "openai", "stripe")
-- name: company name exactly as given above
+- name: full company name
 - sector: "${sectorId}"
 - valuation: latest known private valuation (e.g. "$157B", "$70B")
 - eta: expected IPO timeline (e.g. "Q4 2026", "2027", "Late 2026")
 - etaDate: best estimate in YYYY-MM-DD format
-- status: MUST be one of: "Filed S-1" | "Exploring" | "Rumored" | "Watching" — DO NOT use "Listed"
+- status: MUST be one of: "Filed S-1" | "Exploring" | "Rumored" | "Watching"
 - confidence: integer 0-100 for how likely an IPO is within 2 years
 - description: 2-3 sentences about the company and its IPO outlook
 - newsHeadline: a realistic recent news headline about this company
@@ -143,7 +110,7 @@ Each object MUST have these exact fields:
 - hype: integer 0-100 for investor excitement level
 - tags: array of 2-4 short category strings
 
-IMPORTANT: Do NOT include a "ticker" field. All companies are pre-IPO.
+Do NOT include a "ticker" field. Do NOT include any company that is already public.
 Return ONLY a valid JSON array. No explanation, no markdown. Start with [ and end with ].`;
 
   const raw = await ollamaComplete(prompt);

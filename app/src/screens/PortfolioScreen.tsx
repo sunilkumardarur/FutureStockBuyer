@@ -97,7 +97,7 @@ const PortfolioScreen: React.FC<PortfolioScreenProps> = ({ favorites }) => {
             letterSpacing: '-0.02em',
           }}
         >
-          Portfolio Sim
+          Portfolio Simulator
         </h1>
         <p style={{ fontSize: 12, color: 'var(--text3)', marginTop: 2 }}>
           Enter your actual purchase — see real vs IPO-price return

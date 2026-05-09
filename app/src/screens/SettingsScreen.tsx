@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import type { AppSettings } from '../types';
 import Icon from '../components/shared/Icon';
 
@@ -6,6 +6,7 @@ interface SettingsScreenProps {
   settings: AppSettings;
   onBack: () => void;
   onUpdate: (patch: Partial<AppSettings>) => void;
+  onClearAllCache: () => void;
 }
 
 const ACCENT_PRESETS = [
@@ -19,7 +20,15 @@ const ACCENT_PRESETS = [
   '#34D399', // teal
 ];
 
-const SettingsScreen: React.FC<SettingsScreenProps> = ({ settings, onBack, onUpdate }) => {
+const SettingsScreen: React.FC<SettingsScreenProps> = ({ settings, onBack, onUpdate, onClearAllCache }) => {
+  const [cleared, setCleared] = useState(false);
+
+  const handleClearCache = () => {
+    onClearAllCache();
+    setCleared(true);
+    setTimeout(() => setCleared(false), 2500);
+  };
+
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
       {/* Header */}
@@ -180,6 +189,36 @@ const SettingsScreen: React.FC<SettingsScreenProps> = ({ settings, onBack, onUpd
             />
           </button>
         </div>
+
+        {/* Data */}
+        <p style={{ fontSize: 11, fontWeight: 600, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 12, marginTop: 20 }}>
+          Data
+        </p>
+        <button
+          onClick={handleClearCache}
+          style={{
+            width: '100%',
+            padding: '14px 16px',
+            borderRadius: 14,
+            background: cleared ? 'rgba(74,222,128,0.1)' : 'var(--surface)',
+            border: cleared ? '1px solid #4ADE80' : '1px solid var(--border)',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            cursor: 'pointer',
+            marginBottom: 10,
+          }}
+        >
+          <div style={{ textAlign: 'left' }}>
+            <p style={{ fontSize: 14, fontWeight: 600, color: cleared ? '#4ADE80' : 'var(--text)', marginBottom: 2 }}>
+              {cleared ? 'Cache Cleared' : 'Clear All Cached Data'}
+            </p>
+            <p style={{ fontSize: 12, color: 'var(--text3)' }}>
+              {cleared ? 'Data will reload from Ollama next visit' : 'Force fresh data from Ollama on next load'}
+            </p>
+          </div>
+          <span style={{ fontSize: cleared ? 16 : 14 }}>{cleared ? '✓' : '🗑️'}</span>
+        </button>
 
         {/* About */}
         <p style={{ fontSize: 11, fontWeight: 600, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 12, marginTop: 20 }}>

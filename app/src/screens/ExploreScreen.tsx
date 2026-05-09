@@ -3,6 +3,7 @@ import type { Company, Sector } from '../types';
 import StatusBadge from '../components/shared/StatusBadge';
 import { lookupCustomCompany } from '../lib/ipoData';
 
+
 interface ExploreScreenProps {
   sectors: string[];
   allSectors: Sector[];
@@ -27,6 +28,15 @@ const ExploreScreen: React.FC<ExploreScreenProps> = ({
   const [loadingCustom, setLoadingCustom] = useState(false);
   const [customResult, setCustomResult] = useState<Company | null>(null);
   const [lookupError, setLookupError] = useState('');
+  const [showSuggestions, setShowSuggestions] = useState(false);
+
+  // Suggestions derived dynamically from all loaded sector data
+  const allLoadedCompanies = Object.values(ipoData).flat();
+  const suggestions = customSearch.length >= 2
+    ? allLoadedCompanies
+        .filter((c) => c.name.toLowerCase().includes(customSearch.toLowerCase()))
+        .slice(0, 6)
+    : [];
 
   const allResults = search
     ? allSectors.map((s) => ({
@@ -39,18 +49,28 @@ const ExploreScreen: React.FC<ExploreScreenProps> = ({
       })).filter((s) => s.companies.length > 0)
     : [];
 
-  const fetchCustomCompany = async () => {
-    if (!customSearch.trim()) return;
+  const fetchCustomCompany = async (nameOverride?: string) => {
+    const query = (nameOverride ?? customSearch).trim();
+    if (!query) return;
+    setShowSuggestions(false);
     setLoadingCustom(true);
     setCustomResult(null);
     setLookupError('');
     try {
-      const company = await lookupCustomCompany(customSearch);
+      const company = await lookupCustomCompany(query);
       setCustomResult(company);
     } catch {
       setLookupError('Could not connect to Ollama. Make sure ollama serve is running.');
     }
     setLoadingCustom(false);
+  };
+
+  const selectSuggestion = (company: Company) => {
+    setCustomSearch(company.name);
+    setShowSuggestions(false);
+    // Company is already loaded — show it directly without another Ollama call
+    setCustomResult(company);
+    setLookupError('');
   };
 
   return (
@@ -163,43 +183,92 @@ const ExploreScreen: React.FC<ExploreScreenProps> = ({
             <p style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 10 }}>
               Can't find a company? Ask AI to research it
             </p>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <input
-                value={customSearch}
-                onChange={(e) => setCustomSearch(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && fetchCustomCompany()}
-                placeholder="e.g. Canva, Epic Games..."
-                style={{
-                  flex: 1,
-                  padding: '10px 14px',
-                  borderRadius: 12,
-                  background: 'var(--surface)',
-                  border: '1px solid var(--border-gold)',
-                  color: 'var(--text)',
-                  fontSize: 14,
-                  outline: 'none',
-                  fontFamily: 'var(--font)',
-                }}
-              />
-              <button
-                onClick={fetchCustomCompany}
-                disabled={loadingCustom || !customSearch.trim()}
-                style={{
-                  padding: '10px 14px',
-                  borderRadius: 12,
-                  background: 'var(--gold)',
-                  color: '#0D0D0F',
-                  fontWeight: 700,
-                  fontSize: 14,
-                  border: 'none',
-                  cursor: loadingCustom || !customSearch.trim() ? 'default' : 'pointer',
-                  fontFamily: 'var(--font)',
-                  whiteSpace: 'nowrap',
-                  opacity: loadingCustom || !customSearch.trim() ? 0.6 : 1,
-                }}
-              >
-                {loadingCustom ? '...' : 'Look up'}
-              </button>
+            <div style={{ position: 'relative' }}>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input
+                  value={customSearch}
+                  onChange={(e) => { setCustomSearch(e.target.value); setShowSuggestions(true); setCustomResult(null); }}
+                  onKeyDown={(e) => { if (e.key === 'Enter') fetchCustomCompany(); if (e.key === 'Escape') setShowSuggestions(false); }}
+                  onFocus={() => setShowSuggestions(true)}
+                  placeholder="e.g. Stripe, Canva, Epic Games..."
+                  style={{
+                    flex: 1,
+                    padding: '10px 14px',
+                    borderRadius: 12,
+                    background: 'var(--surface)',
+                    border: '1px solid var(--border-gold)',
+                    color: 'var(--text)',
+                    fontSize: 14,
+                    outline: 'none',
+                    fontFamily: 'var(--font)',
+                  }}
+                />
+                <button
+                  onClick={() => fetchCustomCompany()}
+                  disabled={loadingCustom || !customSearch.trim()}
+                  style={{
+                    padding: '10px 14px',
+                    borderRadius: 12,
+                    background: 'var(--gold)',
+                    color: '#0D0D0F',
+                    fontWeight: 700,
+                    fontSize: 14,
+                    border: 'none',
+                    cursor: loadingCustom || !customSearch.trim() ? 'default' : 'pointer',
+                    fontFamily: 'var(--font)',
+                    whiteSpace: 'nowrap',
+                    opacity: loadingCustom || !customSearch.trim() ? 0.6 : 1,
+                  }}
+                >
+                  {loadingCustom ? '...' : 'Look up'}
+                </button>
+              </div>
+
+              {/* Autocomplete dropdown */}
+              {showSuggestions && suggestions.length > 0 && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: '100%',
+                    left: 0,
+                    right: 0,
+                    marginTop: 4,
+                    background: 'var(--surface)',
+                    border: '1px solid var(--border-gold)',
+                    borderRadius: 12,
+                    overflow: 'hidden',
+                    zIndex: 100,
+                    boxShadow: '0 8px 24px rgba(0,0,0,0.3)',
+                  }}
+                >
+                  {suggestions.map((c) => (
+                    <button
+                      key={c.id}
+                      onMouseDown={(e) => { e.preventDefault(); selectSuggestion(c); }}
+                      style={{
+                        width: '100%',
+                        padding: '10px 14px',
+                        background: 'transparent',
+                        border: 'none',
+                        borderBottom: '1px solid var(--border)',
+                        color: 'var(--text)',
+                        fontSize: 14,
+                        textAlign: 'left',
+                        cursor: 'pointer',
+                        fontFamily: 'var(--font)',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                      }}
+                      onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--bg3)')}
+                      onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                    >
+                      <span>{c.name}</span>
+                      <StatusBadge status={c.status} />
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
             {customResult && (

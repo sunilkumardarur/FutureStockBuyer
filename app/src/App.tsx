@@ -207,6 +207,11 @@ const App: React.FC = () => {
     setIpoData((prev) => ({ ...prev, [sectorId]: companies }));
   };
 
+  const clearAllCache = () => {
+    SECTORS.forEach((s) => clearCacheForSector(s.id));
+    setIpoData({});
+  };
+
   const updateSettings = (patch: Partial<AppSettings>) => {
     setSettings((prev) => ({ ...prev, ...patch }));
   };
@@ -261,6 +266,7 @@ const App: React.FC = () => {
           settings={settings}
           onBack={popScreen}
           onUpdate={updateSettings}
+          onClearAllCache={clearAllCache}
         />
       );
     }
